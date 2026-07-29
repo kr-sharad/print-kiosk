@@ -80,6 +80,50 @@ function shredTempFile(tempFilePath) {
   }
 }
 
+// ========================================================
+// 🔔 NEW: AUTOMATED MACRODROID / PHONE PAYMENT WEBHOOK
+// ========================================================
+app.post('/api/payment-webhook', (req, res) => {
+  try {
+    const { notification_text } = req.body || {}
+    console.log('[PAYMENT WEBHOOK] Received Text:', notification_text)
+
+    if (!notification_text) {
+      return res.status(400).json({ success: false, error: 'No notification_text provided' })
+    }
+
+    // Regex to match payment amounts like "Rs. 15.00", "Rs 20", "₹10", "₹ 50.00"
+    const amountMatch = notification_text.match(/(?:Rs\.?|₹)\s*([\d.]+)/i)
+
+    if (amountMatch) {
+      const amountReceived = parseFloat(amountMatch[1])
+      
+      // Automatic Approval for the active session!
+      paymentSession.isPaid = true
+      paymentSession.amount = amountReceived
+      paymentSession.printStatus = 'payment_confirmed'
+
+      console.log(`[PAYMENT WEBHOOK] ✅ Payment Confirmed automatically! Amount: ₹${amountReceived}`)
+
+      return res.status(200).json({
+        success: true,
+        message: 'Payment detected and kiosk session approved',
+        amount: amountReceived
+      })
+    }
+
+    console.log('[PAYMENT WEBHOOK] ⚠️ No valid payment amount found in text.')
+    return res.status(200).json({
+      success: false,
+      message: 'Notification received, but no payment amount matched'
+    })
+
+  } catch (error) {
+    console.error('[PAYMENT WEBHOOK] ❌ Error:', error instanceof Error ? error.message : error)
+    return res.status(500).json({ success: false, error: 'Internal Server Error' })
+  }
+})
+
 app.post('/api/upload', upload.single('file'), async (req, res) => {
   console.log('[UPLOAD] POST /api/upload')
 
@@ -88,6 +132,8 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
   }
 
   paymentSession.isPaid = false
+  paymentSession.printStatus = 'waiting'
+  paymentSession.amount = 0
 
   if (fileBuffer !== null) {
     secureWipe('replaced by new upload')
@@ -127,7 +173,7 @@ app.post('/api/print', (req, res) => {
   console.log('[PRINT] POST /api/print')
 
   if (!paymentSession.isPaid) {
-    return res.status(403).json({ error: 'Payment not confirmed. Await admin approval.' })
+    return res.status(403).json({ error: 'Payment not confirmed. Await admin approval or UPI notification.' })
   }
 
   if (fileBuffer === null || fileMeta === null) {
@@ -175,6 +221,8 @@ app.post('/api/print', (req, res) => {
 
 app.post('/api/cancel', (_req, res) => {
   paymentSession.isPaid = false
+  paymentSession.printStatus = 'waiting'
+  paymentSession.amount = 0
   secureWipe('user cancelled from kiosk')
   res.json({ success: true, message: 'Session cancelled and memory cleared' })
 })
